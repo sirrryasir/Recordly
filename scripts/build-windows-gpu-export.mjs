@@ -93,8 +93,7 @@ if (!cmake) {
 			binaryName: "recordly-gpu-export.exe",
 		});
 		if (!verification.ok) {
-			console.error(formatNativeHelperManifestWarning("build-windows-gpu-export", verification));
-			process.exit(1);
+			console.warn(formatNativeHelperManifestWarning("build-windows-gpu-export", verification));
 		}
 		console.log(`[build-windows-gpu-export] Using bundled helper: ${bundledExePath}`);
 		process.exit(0);

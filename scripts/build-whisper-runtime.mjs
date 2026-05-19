@@ -370,7 +370,9 @@ async function main() {
 		// (e.g. via `npm run build`, `build:win`, `build:mac`, `build:linux`)
 		// must still fail loudly so we never ship a release build that is
 		// missing the whisper runtime and silently ships broken auto-captions.
-		const isPostinstall = process.env.npm_lifecycle_event === "postinstall";
+		const isPostinstall =
+			process.env.npm_lifecycle_event === "postinstall" ||
+			process.env.RECORDLY_POSTINSTALL === "1";
 		const isCI = process.env.CI === "true";
 		const allowMissing = process.env.WHISPER_RUNTIME_ALLOW_MISSING === "1";
 		const softFailAllowed = isPostinstall || isCI || allowMissing;

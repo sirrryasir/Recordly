@@ -2,7 +2,23 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
+import { startup } from "vite-plugin-electron";
 import electron from "vite-plugin-electron/simple";
+
+// Patch startup.exit to catch errors from taskkill on Windows
+if (startup && typeof startup.exit === "function") {
+	const originalExit = startup.exit;
+	startup.exit = async () => {
+		try {
+			await originalExit();
+		} catch (error) {
+			console.warn(
+				"[vite-plugin-electron] Ignored exit error:",
+				error instanceof Error ? error.message : String(error),
+			);
+		}
+	};
+}
 
 function electronMainCjsOutputPlugin(): Plugin {
 	return {

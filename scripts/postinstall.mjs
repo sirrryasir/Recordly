@@ -18,7 +18,7 @@ function runScript(scriptName) {
 	console.log(`[postinstall] Running npm script: ${scriptName}`);
 	const result = spawnSync(npmInvoker.command, [...npmInvoker.argsPrefix, "run", scriptName], {
 		stdio: "inherit",
-		env: process.env,
+		env: { ...process.env, RECORDLY_POSTINSTALL: "1" },
 		shell: npmInvoker.shell,
 	});
 
