@@ -136,6 +136,7 @@ let sourceSelectorWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let trayContextMenu: Menu | null = null;
 let selectedSourceName = "";
+let isRecordingActive = false;
 let editorHasUnsavedChanges = false;
 let isForceClosing = false;
 let isCreatingMainWindow = false;
@@ -305,6 +306,7 @@ function focusOrCreateMainWindow() {
 		// window gets focus (creation path works). Only for HUD, not editor.
 		if (
 			process.platform === "linux" &&
+			!isRecordingActive &&
 			!mainWindow.isFocused() &&
 			!isEditorWindow(mainWindow)
 		) {
@@ -984,6 +986,7 @@ app.whenReady().then(async () => {
 		() => mainWindow,
 		() => sourceSelectorWindow,
 		(recording: boolean, sourceName: string) => {
+			isRecordingActive = recording;
 			selectedSourceName = sourceName;
 			if (!tray) createTray();
 			updateTrayMenu(recording);

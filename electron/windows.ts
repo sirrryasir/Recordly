@@ -181,8 +181,29 @@ function getHudOverlayDisplay() {
 	return getScreen().getPrimaryDisplay();
 }
 
+let hudUserPosition: { x: number; y: number } | null = null;
+
 function getHudOverlayBounds() {
 	const { workArea } = getHudOverlayDisplay();
+
+	if (process.platform === "linux") {
+		const width = 640;
+		const height = 480;
+
+		if (hudUserPosition) {
+			return {
+				x: hudUserPosition.x,
+				y: hudUserPosition.y,
+				width,
+				height,
+			};
+		}
+
+		const x = Math.round(workArea.x + (workArea.width - width) / 2);
+		const y = Math.round(workArea.y + workArea.height - height - 12);
+		return { x, y, width, height };
+	}
+
 	return {
 		x: workArea.x,
 		y: workArea.y,
@@ -259,7 +280,6 @@ ipcMain.on("hud-overlay-set-ignore-mouse", (_event, ignore: boolean) => {
 });
 
 // Keep compatibility with existing drag IPC/state.
-let hudUserPosition: { x: number; y: number } | null = null;
 let hudDragOffset: { x: number; y: number } | null = null;
 let hudDragLastCursor: { x: number; y: number } | null = null;
 let hudDragFixedSize: { width: number; height: number } | null = null;
@@ -317,7 +337,11 @@ ipcMain.on("hud-overlay-drag", (_event, phase: string, screenX: number, screenY:
 
 ipcMain.on("hud-overlay-hide", () => {
 	if (hudOverlayWindow && !hudOverlayWindow.isDestroyed()) {
-		hudOverlayWindow.minimize();
+		if (process.platform === "linux") {
+			hudOverlayWindow.hide();
+		} else {
+			hudOverlayWindow.minimize();
+		}
 	}
 });
 
@@ -366,6 +390,7 @@ export function createHudOverlayWindow(): BrowserWindow {
 		height: initialBounds.height,
 		x: initialBounds.x,
 		y: initialBounds.y,
+		type: process.platform === "linux" ? "utility" : undefined,
 		frame: false,
 		transparent: true,
 		backgroundColor: "#00000000",

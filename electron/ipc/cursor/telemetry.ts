@@ -1,4 +1,7 @@
 import fs from "node:fs/promises";
+import net from "node:net";
+import path from "node:path";
+
 import {
 	CURSOR_SAMPLE_INTERVAL_MS,
 	CURSOR_TELEMETRY_VERSION,
@@ -107,6 +110,7 @@ export function stopCursorCapture() {
 		clearTimeout(cursorCaptureInterval);
 		setCursorCaptureInterval(null);
 	}
+	stopHyprlandCursorLoop();
 }
 
 export function resetCursorCaptureClock() {
@@ -174,13 +178,18 @@ export function getNormalizedCursorPoint() {
 	const fallbackCursor = getScreen().getCursorScreenPoint();
 	const linuxCursorCache = process.platform === "linux" ? linuxCursorScreenPoint : null;
 	const isLinuxCacheFresh = !!linuxCursorCache && Date.now() - linuxCursorCache.updatedAt <= 1000;
+	const isHyprlandFresh = !!hyprlandCursorCache && Date.now() - hyprlandCursorCache.updatedAt <= 1000;
 
 	const primarySf =
 		process.platform !== "darwin" ? getScreen().getPrimaryDisplay().scaleFactor || 1 : 1;
 
-	const cursor = isLinuxCacheFresh
-		? { x: linuxCursorCache.x / primarySf, y: linuxCursorCache.y / primarySf }
-		: fallbackCursor;
+	const cursor = isHyprlandFresh
+		? { x: hyprlandCursorCache!.x / primarySf, y: hyprlandCursorCache!.y / primarySf }
+		: isLinuxCacheFresh
+			? { x: linuxCursorCache!.x / primarySf, y: linuxCursorCache!.y / primarySf }
+			: fallbackCursor;
+
+
 
 	const windowBounds = selectedSource?.id?.startsWith("window:") ? selectedWindowBounds : null;
 	if (windowBounds) {
@@ -292,8 +301,86 @@ export function snapshotCursorTelemetryForPersistence() {
 	]);
 }
 
+let hyprlandCursorCache: { x: number; y: number; updatedAt: number } | null = null;
+let hyprlandLoopInterval: NodeJS.Timeout | null = null;
+let isQueryInProgress = false;
+
+function queryHyprlandCursorPos() {
+	if (isQueryInProgress) return;
+	isQueryInProgress = true;
+
+	try {
+		const xdgRuntimeDir = process.env.XDG_RUNTIME_DIR || `/run/user/1000`;
+		const signature = process.env.HYPRLAND_INSTANCE_SIGNATURE;
+		if (!signature) {
+			isQueryInProgress = false;
+			return;
+		}
+
+		const socketPath = path.join(xdgRuntimeDir, "hypr", signature, ".socket.sock");
+		const client = net.createConnection(socketPath, () => {
+			client.write("cursorpos");
+		});
+
+		let data = "";
+		client.on("data", (chunk) => {
+			data += chunk.toString();
+		});
+
+		const finish = () => {
+			isQueryInProgress = false;
+			client.destroy();
+		};
+
+		client.on("end", () => {
+			const parts = data.trim().split(",");
+			if (parts.length === 2) {
+				const x = parseFloat(parts[0]);
+				const y = parseFloat(parts[1]);
+				if (Number.isFinite(x) && Number.isFinite(y)) {
+					hyprlandCursorCache = { x, y, updatedAt: Date.now() };
+				}
+			}
+			finish();
+		});
+
+		client.on("error", () => {
+			finish();
+		});
+
+		client.setTimeout(50);
+		client.on("timeout", () => {
+			finish();
+		});
+	} catch (e) {
+		isQueryInProgress = false;
+	}
+}
+
+export function startHyprlandCursorLoop() {
+	stopHyprlandCursorLoop();
+	if (!process.env.HYPRLAND_INSTANCE_SIGNATURE) return;
+
+	const tick = () => {
+		if (isCursorCaptureActive && !isCursorCapturePaused()) {
+			queryHyprlandCursorPos();
+		}
+		hyprlandLoopInterval = setTimeout(tick, 10);
+	};
+	tick();
+}
+
+export function stopHyprlandCursorLoop() {
+	if (hyprlandLoopInterval) {
+		clearTimeout(hyprlandLoopInterval);
+		hyprlandLoopInterval = null;
+	}
+}
+
 export function startCursorSampling() {
 	stopCursorCapture();
+	startHyprlandCursorLoop();
+
 
 	// Use recursive setTimeout with drift compensation instead of setInterval.
 	// Under CPU load setInterval bunches or skips callbacks, creating large gaps

@@ -62,7 +62,9 @@ export type NativeStaticLayoutBackend =
 	| "cuda-scale-cpu-pad"
 	| "cuda-static-composite"
 	| "nvidia-cuda-compositor"
-	| "windows-d3d11-compositor";
+	| "windows-d3d11-compositor"
+	| "cpu-precomposited"
+	| "cpu-overlay";
 
 export interface NativeStaticLayoutExportArgsConfig {
 	inputPath: string;
@@ -345,6 +347,45 @@ export function buildNativeCudaOverlayStaticLayoutArgs(
 	return args;
 }
 
+export function buildNativeCpuOverlayStaticLayoutArgs(
+	encoder: string,
+	config: NativeStaticLayoutExportArgsConfig,
+): string[] {
+	const backgroundColor = formatFfmpegColor(config.backgroundColor);
+	const durationSec = formatFfmpegSeconds(Math.max(0.001, config.durationSec ?? 1) * 1000);
+	const args = ["-y", "-hide_banner", "-loglevel", "error"];
+	pushFfmpegTimeSliceArgs(args, config.startSec, config.durationSec);
+	args.push(
+		"-i",
+		config.inputPath,
+		"-filter_complex",
+		`color=c=${backgroundColor}:s=${config.width}x${config.height}:r=${config.frameRate}:d=${durationSec},format=yuv420p[bg];[0:v]scale=w=${config.contentWidth}:h=${config.contentHeight},fps=${config.frameRate},format=yuv420p[fg];[bg][fg]overlay=x=${config.offsetX}:y=${config.offsetY}:shortest=0:repeatlast=1:eof_action=repeat,trim=duration=${durationSec},setpts=PTS-STARTPTS[out]`,
+		"-map",
+		"[out]",
+		"-an",
+		"-r",
+		String(config.frameRate),
+		"-c:v",
+		encoder,
+	);
+
+	if (encoder === "libx264") {
+		args.push(...getLibx264ModeArgs(config.encodingMode));
+	} else if (encoder.includes("nvenc")) {
+		args.push(...getNvencStaticLayoutModeArgs(config.encodingMode));
+	}
+
+	args.push(
+		...getBitrateArgs(config.bitrate),
+		"-pix_fmt",
+		"yuv420p",
+		"-movflags",
+		"+faststart",
+		config.outputPath,
+	);
+	return args;
+}
+
 export function buildNativeCudaScaleCpuPadStaticLayoutArgs(
 	config: NativeStaticLayoutExportArgsConfig,
 ): string[] {
@@ -530,6 +571,78 @@ export function buildNativePrecompositedStaticLayoutArgs(
 		"-c:v",
 		"h264_nvenc",
 		...getNvencStaticLayoutModeArgs(config.encodingMode),
+		...getBitrateArgs(config.bitrate),
+		"-pix_fmt",
+		"yuv420p",
+		"-movflags",
+		"+faststart",
+		config.outputPath,
+	);
+	return args;
+}
+
+export function buildNativeCpuPrecompositedStaticLayoutArgs(
+	encoder: string,
+	config: NativeStaticLayoutExportArgsConfig,
+): string[] {
+	if (!config.staticBackgroundPath) {
+		throw new Error("Native precomposited static layout requires a static background path");
+	}
+
+	const durationSec = formatFfmpegSeconds(Math.max(0.001, config.durationSec ?? 1) * 1000);
+	const useMask = Boolean(config.maskPath && (config.borderRadius ?? 0) > 0.5);
+	const args = ["-y", "-hide_banner", "-loglevel", "error"];
+	pushFfmpegTimeSliceArgs(args, config.startSec, config.durationSec);
+	args.push(
+		"-i",
+		config.inputPath,
+		"-loop",
+		"1",
+		"-framerate",
+		String(config.frameRate),
+		"-t",
+		durationSec,
+		"-i",
+		config.staticBackgroundPath,
+	);
+
+	if (useMask && config.maskPath) {
+		args.push(
+			"-loop",
+			"1",
+			"-framerate",
+			String(config.frameRate),
+			"-t",
+			durationSec,
+			"-i",
+			config.maskPath,
+		);
+	}
+
+	const foregroundFilter = `[0:v]scale=w=${config.contentWidth}:h=${config.contentHeight},fps=${config.frameRate},format=rgba[fgbase]`;
+	const maskFilter = useMask ? ";[2:v]format=gray[mask];[fgbase][mask]alphamerge[fg]" : "";
+	const foregroundLabel = useMask ? "fg" : "fgbase";
+	const filterComplex = `${foregroundFilter}${maskFilter};[1:v]format=rgba[bg];[bg][${foregroundLabel}]overlay=x=${config.offsetX}:y=${config.offsetY}:format=auto,trim=duration=${durationSec},setpts=PTS-STARTPTS,format=yuv420p[out]`;
+
+	args.push(
+		"-filter_complex",
+		filterComplex,
+		"-map",
+		"[out]",
+		"-an",
+		"-r",
+		String(config.frameRate),
+		"-c:v",
+		encoder,
+	);
+
+	if (encoder === "libx264") {
+		args.push(...getLibx264ModeArgs(config.encodingMode));
+	} else if (encoder.includes("nvenc")) {
+		args.push(...getNvencStaticLayoutModeArgs(config.encodingMode));
+	}
+
+	args.push(
 		...getBitrateArgs(config.bitrate),
 		"-pix_fmt",
 		"yuv420p",

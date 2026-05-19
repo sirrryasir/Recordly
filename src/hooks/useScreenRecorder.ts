@@ -1495,7 +1495,9 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 				}
 			}
 
-			hideEditorOverlayCursorByDefault.current = true;
+			if (platform !== "linux") {
+				hideEditorOverlayCursorByDefault.current = true;
+			}
 
 			const wantsAudioCapture = microphoneEnabled || systemAudioEnabled;
 			const browserCaptureSource = await resolveBrowserCaptureSource(selectedSource);
@@ -1793,17 +1795,20 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 					);
 				}
 			};
+			recorder.onstart = () => {
+				console.log("[useScreenRecorder:browser] MediaRecorder started, triggering electron cursor capture");
+				const mainStartedAt = Date.now();
+				beginWebcamCapture();
+				resetRecordingClock(mainStartedAt);
+				webcamTimeOffsetMs.current =
+					webcamStartTime.current === null ? 0 : webcamStartTime.current - mainStartedAt;
+				window.electronAPI?.setRecordingState(true);
+			};
 			recorder.onerror = () => {
 				setRecording(false);
 			};
-			const mainStartedAt = Date.now();
-			beginWebcamCapture();
-			resetRecordingClock(mainStartedAt);
-			webcamTimeOffsetMs.current =
-				webcamStartTime.current === null ? 0 : webcamStartTime.current - mainStartedAt;
 			recorder.start(RECORDER_TIMESLICE_MS);
 			setRecording(true);
-			window.electronAPI?.setRecordingState(true);
 		} catch (error) {
 			console.error("Failed to start recording:", error);
 			alert(
